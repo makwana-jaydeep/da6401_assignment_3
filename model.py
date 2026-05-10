@@ -59,7 +59,7 @@ class MultiHeadAttention(nn.Module):
         self.W_o = nn.Linear(d_model, d_model)
         self.dropout = nn.Dropout(p=dropout)
 
-    def forward(self, query: torch.Tensor, key: torch.Tensor, value: torch.Tensor, mask: Optional[torch.Tensor] = None) -> torch.Tensor:
+    def forward(self, query, key, value, mask=None):
         batch_size = query.size(0)
 
         Q = self.W_q(query).view(batch_size, -1, self.num_heads, self.d_k).transpose(1, 2)
@@ -79,7 +79,9 @@ class PositionalEncoding(nn.Module):
 
         pe = torch.zeros(max_len, d_model)
         position = torch.arange(0, max_len, dtype=torch.float).unsqueeze(1)
-        div_term = torch.exp(torch.arange(0, d_model, 2, dtype=torch.float) * (-math.log(10000.0) / d_model))
+        div_term = torch.exp(
+            torch.arange(0, d_model, 2, dtype=torch.float) * (-math.log(10000.0) / d_model)
+        )
 
         pe[:, 0::2] = torch.sin(position * div_term)
         pe[:, 1::2] = torch.cos(position * div_term)
@@ -103,7 +105,7 @@ class PositionwiseFeedForward(nn.Module):
 
 
 class EncoderLayer(nn.Module):
-    def __init__(self, d_model: int, num_heads: int, d_ff: int, dropout: float = 0.1) -> None:
+    def __init__(self, d_model, num_heads, d_ff, dropout=0.1):
         super().__init__()
         self.self_attn = MultiHeadAttention(d_model, num_heads, dropout)
         self.ffn = PositionwiseFeedForward(d_model, d_ff, dropout)
@@ -111,14 +113,14 @@ class EncoderLayer(nn.Module):
         self.norm2 = nn.LayerNorm(d_model)
         self.dropout = nn.Dropout(p=dropout)
 
-    def forward(self, x: torch.Tensor, src_mask: torch.Tensor) -> torch.Tensor:
+    def forward(self, x, src_mask):
         x = self.norm1(x + self.dropout(self.self_attn(x, x, x, src_mask)))
         x = self.norm2(x + self.dropout(self.ffn(x)))
         return x
 
 
 class DecoderLayer(nn.Module):
-    def __init__(self, d_model: int, num_heads: int, d_ff: int, dropout: float = 0.1) -> None:
+    def __init__(self, d_model, num_heads, d_ff, dropout=0.1):
         super().__init__()
         self.self_attn = MultiHeadAttention(d_model, num_heads, dropout)
         self.cross_attn = MultiHeadAttention(d_model, num_heads, dropout)
@@ -128,7 +130,7 @@ class DecoderLayer(nn.Module):
         self.norm3 = nn.LayerNorm(d_model)
         self.dropout = nn.Dropout(p=dropout)
 
-    def forward(self, x: torch.Tensor, memory: torch.Tensor, src_mask: torch.Tensor, tgt_mask: torch.Tensor) -> torch.Tensor:
+    def forward(self, x, memory, src_mask, tgt_mask):
         x = self.norm1(x + self.dropout(self.self_attn(x, x, x, tgt_mask)))
         x = self.norm2(x + self.dropout(self.cross_attn(x, memory, memory, src_mask)))
         x = self.norm3(x + self.dropout(self.ffn(x)))
@@ -136,24 +138,24 @@ class DecoderLayer(nn.Module):
 
 
 class Encoder(nn.Module):
-    def __init__(self, layer: EncoderLayer, N: int) -> None:
+    def __init__(self, layer, N):
         super().__init__()
         self.layers = nn.ModuleList([copy.deepcopy(layer) for _ in range(N)])
         self.norm = nn.LayerNorm(layer.norm1.normalized_shape)
 
-    def forward(self, x: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
+    def forward(self, x, mask):
         for layer in self.layers:
             x = layer(x, mask)
         return self.norm(x)
 
 
 class Decoder(nn.Module):
-    def __init__(self, layer: DecoderLayer, N: int) -> None:
+    def __init__(self, layer, N):
         super().__init__()
         self.layers = nn.ModuleList([copy.deepcopy(layer) for _ in range(N)])
         self.norm = nn.LayerNorm(layer.norm1.normalized_shape)
 
-    def forward(self, x: torch.Tensor, memory: torch.Tensor, src_mask: torch.Tensor, tgt_mask: torch.Tensor) -> torch.Tensor:
+    def forward(self, x, memory, src_mask, tgt_mask):
         for layer in self.layers:
             x = layer(x, memory, src_mask, tgt_mask)
         return self.norm(x)
@@ -173,7 +175,7 @@ class Transformer(nn.Module):
     ) -> None:
         super().__init__()
         self.d_model = d_model
-        
+
         self.src_embedding = nn.Embedding(src_vocab_size, d_model)
         self.tgt_embedding = nn.Embedding(tgt_vocab_size, d_model)
         self.src_pos_enc = PositionalEncoding(d_model, dropout)
@@ -187,73 +189,21 @@ class Transformer(nn.Module):
             if p.dim() > 1:
                 nn.init.xavier_uniform_(p)
 
-    def encode(self, src: torch.Tensor, src_mask: torch.Tensor) -> torch.Tensor:
-        return self.encoder(self.src_pos_enc(self.src_embedding(src) * math.sqrt(self.d_model)), src_mask)
+    def encode(self, src, src_mask):
+        return self.encoder(
+            self.src_pos_enc(self.src_embedding(src) * math.sqrt(self.d_model)), src_mask
+        )
 
-    def decode(self, memory: torch.Tensor, src_mask: torch.Tensor, tgt: torch.Tensor, tgt_mask: torch.Tensor) -> torch.Tensor:
-        return self.output_projection(self.decoder(self.tgt_pos_enc(self.tgt_embedding(tgt) * math.sqrt(self.d_model)), memory, src_mask, tgt_mask))
+    def decode(self, memory, src_mask, tgt, tgt_mask):
+        return self.output_projection(
+            self.decoder(
+                self.tgt_pos_enc(self.tgt_embedding(tgt) * math.sqrt(self.d_model)),
+                memory, src_mask, tgt_mask,
+            )
+        )
 
-    def forward(self, src: torch.Tensor, tgt: torch.Tensor, src_mask: torch.Tensor, tgt_mask: torch.Tensor) -> torch.Tensor:
+    def forward(self, src, tgt, src_mask, tgt_mask):
         return self.decode(self.encode(src, src_mask), src_mask, tgt, tgt_mask)
-
-
-    # =================================================================
-    # THE TRANSLATOR OVERRIDE: Renames Colab weights to Template weights
-    # =================================================================
-    def load_state_dict(self, state_dict, strict=True, assign=False):
-        download_path = "/autograder/source/best_noam_final.pt"
-        
-        if not os.path.exists(download_path):
-            try:
-                import gdown
-                gdown.download(id="1yQMTaEXZCaKnA74XxDtrsxJXmUnzQvmL", output=download_path, quiet=False)
-            except Exception: pass
-
-        if os.path.exists(download_path):
-            try:
-                ckpt = torch.load(download_path, map_location="cpu")
-                good_state_dict = ckpt.get("model_state_dict", ckpt) if isinstance(ckpt, dict) else ckpt.state_dict()
-                
-                new_state_dict = {}
-                model_keys = list(super().state_dict().keys())
-                
-                # We translate the variable names from your Colab training script 
-                # to the official assignment template variable names.
-                for old_k, v in good_state_dict.items():
-                    k = old_k.replace("src_embed.0.", "src_embedding.")
-                    k = k.replace("tgt_embed.0.", "tgt_embedding.")
-                    k = k.replace("src_embed.1.", "src_pos_enc.")
-                    k = k.replace("tgt_embed.1.", "tgt_pos_enc.")
-                    k = k.replace("generator.", "output_projection.")
-                    k = k.replace("w_q.", "W_q.")
-                    k = k.replace("w_k.", "W_k.")
-                    k = k.replace("w_v.", "W_v.")
-                    k = k.replace("w_o.", "W_o.")
-                    k = k.replace("src_attn.", "cross_attn.")
-                    k = k.replace("feed_forward.", "ffn.")
-                    
-                    if k in model_keys:
-                        model_v = super().state_dict()[k]
-                        if v.shape != model_v.shape:
-                            # Safely handle autograder vocabulary dimension differences
-                            new_v = model_v.clone()
-                            if v.dim() == 2 and model_v.dim() == 2:
-                                s0, s1 = min(v.size(0), model_v.size(0)), min(v.size(1), model_v.size(1))
-                                new_v[:s0, :s1] = v[:s0, :s1]
-                            elif v.dim() == 1 and model_v.dim() == 1:
-                                s0 = min(v.size(0), model_v.size(0))
-                                new_v[:s0] = v[:s0]
-                            new_state_dict[k] = new_v
-                        else:
-                            new_state_dict[k] = v
-                
-                # Inject the translated, shape-aligned weights
-                return super().load_state_dict(new_state_dict, strict=False)
-            except Exception:
-                pass
-                
-        # Fallback if download fails
-        return super().load_state_dict(state_dict, strict=False)
 
     def infer(self, src_sentence: str) -> str:
         self.eval()
