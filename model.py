@@ -250,10 +250,10 @@ class Transformer(nn.Module):
         self,
         src_vocab_size: int = 10000,
         tgt_vocab_size: int = 10000,
-        d_model: int = 256,  # <-- CHANGED TO MATCH YOUR TRAINED CHECKPOINT
-        N: int = 3,          # <-- CHANGED TO MATCH YOUR TRAINED CHECKPOINT
+        d_model: int = 256,   # <-- Changed from 512
+        N: int = 3,           # <-- Changed from 6
         num_heads: int = 8,
-        d_ff: int = 512,     # <-- CHANGED TO MATCH YOUR TRAINED CHECKPOINT
+        d_ff: int = 512,      # <-- Changed from 2048
         dropout: float = 0.1,
         checkpoint_path: str = None,
     ) -> None:
@@ -313,7 +313,7 @@ class Transformer(nn.Module):
                 self.load_state_dict(ckpt["model_state_dict"], strict=False)
             except Exception as e:
                 pass
-            
+
     def _init_weights(self):
         for p in self.parameters():
             if p.dim() > 1:
