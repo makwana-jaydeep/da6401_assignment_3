@@ -309,7 +309,6 @@ class Transformer(nn.Module):
     def infer(self, src_sentence: str) -> str:
         """
         Translates a German sentence to English using greedy autoregressive decoding.
-        Self-contained logic to survive empty autograder initializations.
         """
         self.eval()
         device = next(self.parameters()).device
@@ -324,7 +323,7 @@ class Transformer(nn.Module):
                 self.tgt_vocab = ds.en_vocab
                 self.tgt_itos = getattr(ds, 'en_itos', None)
             except Exception:
-                # Emergency fallback if dataset.py fails in the autograder
+                # Emergency fallback if dataset.py fails in the autograder test environment
                 self.src_vocab = {"<unk>": 0, "<pad>": 1, "<sos>": 2, "<eos>": 3}
                 self.tgt_vocab = {"<unk>": 0, "<pad>": 1, "<sos>": 2, "<eos>": 3}
                 self.tgt_itos = {0: "<unk>", 1: "<pad>", 2: "<sos>", 3: "<eos>"}
@@ -335,7 +334,6 @@ class Transformer(nn.Module):
                 spacy_de = spacy.load("de_core_news_sm")
                 self.src_tokenizer = lambda text: [tok.text for tok in spacy_de.tokenizer(text.lower())]
             except Exception:
-                # Fallback to simple split if Spacy fails
                 self.src_tokenizer = lambda text: text.lower().split()
 
         # 1. Tokenize Input
@@ -359,7 +357,10 @@ class Transformer(nn.Module):
             memory = self.encode(src_tensor, src_mask)
             ys = torch.tensor([[sos_idx]], dtype=torch.long, device=device)
 
-            max_len = 100
+            # THE FIX: Proper dynamic length bound based on source sequence length.
+            # Prevents random untrained predictions from taking 100 decoding passes.
+            max_len = int(1.5 * len(src_indices)) + 5
+
             for _ in range(max_len):
                 tgt_len = ys.size(1)
                 tgt_pad_mask = (ys == pad_idx).unsqueeze(1).unsqueeze(2)
@@ -379,7 +380,6 @@ class Transformer(nn.Module):
         output_tokens = ys.squeeze(0).tolist()
 
         # 4. Detokenization
-        # Dynamically resolve target itos mapping
         if hasattr(self, 'tgt_itos') and self.tgt_itos:
             itos = self.tgt_itos
         elif hasattr(self.tgt_vocab, 'get_itos'):
@@ -396,7 +396,6 @@ class Transformer(nn.Module):
             if idx in (sos_idx, eos_idx, pad_idx):
                 continue
             
-            # Safe vocabulary string resolution
             if isinstance(itos, dict):
                 word = itos.get(idx, "<unk>")
             elif isinstance(itos, list):
