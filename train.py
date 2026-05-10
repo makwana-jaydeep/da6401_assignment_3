@@ -23,7 +23,7 @@ from torch.utils.data import DataLoader
 from typing import Optional
 
 import wandb
-from evaluate import load as load_metric
+from datasets import load_metric
 
 from model import Transformer, make_src_mask, make_tgt_mask
 from lr_scheduler import NoamScheduler
@@ -191,21 +191,11 @@ def evaluate_bleu(
     device: str = "cpu",
     max_len: int = 100,
 ) -> float:
-    """
-    Evaluate translation quality with corpus-level BLEU score.
-
-    Args:
-        model           : Trained Transformer (in eval mode).
-        test_dataloader : DataLoader over the test split.
-        tgt_vocab       : Vocabulary object with idx_to_token mapping.
-        device          : 'cpu' or 'cuda'.
-        max_len         : Max decode length per sentence.
-
-    Returns:
-        bleu_score : Corpus-level BLEU (float, range 0-100).
-    """
+    
     model.eval()
-    bleu_metric = load_metric("bleu")
+    
+    # Use the datasets library instead of evaluate
+    bleu_metric = load_metric("sacrebleu", trust_remote_code=True)
 
     tgt_itos = tgt_vocab.get_itos()
     special = {"<sos>", "<eos>", "<pad>", "<unk>"}
@@ -219,7 +209,7 @@ def evaluate_bleu(
     with torch.no_grad():
         for src, tgt in test_dataloader:
             src = src.to(device)
-            src_mask = make_src_mask(src, pad_idx=PAD_IDX)
+            src_mask = make_src_mask(src, pad_idx=1) # Ensure pad_idx matches your constant
 
             output = greedy_decode(
                 model, src, src_mask, max_len, sos_idx, eos_idx, device
@@ -237,12 +227,12 @@ def evaluate_bleu(
                 if tgt_itos[i] not in special
             ]
 
-            all_predictions.append(pred_words)
-            all_references.append([ref_words])
+            # sacrebleu expects joined strings, not lists of words
+            all_predictions.append(" ".join(pred_words))
+            all_references.append([" ".join(ref_words)])
 
     result = bleu_metric.compute(predictions=all_predictions, references=all_references)
-    bleu_score = result["bleu"] * 100.0
-    return bleu_score
+    return result["score"]
 
 
 def save_checkpoint(
