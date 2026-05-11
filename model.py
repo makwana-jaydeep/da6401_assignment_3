@@ -223,7 +223,7 @@ class Transformer(nn.Module):
         if not os.path.exists(download_path):
             try:
                 import gdown
-                gdown.download(id="19KSjaPnLOPYy5GyTsfKe9-e5LNVfXWCo", output=download_path, quiet=False)
+                gdown.download(id="12ii8FI5fcp91bwVvYEUwjbExj2hiN_bc", output=download_path, quiet=False)
             except Exception: pass
 
         if os.path.exists(download_path):
