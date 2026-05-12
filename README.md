@@ -1,9 +1,34 @@
-# DA6401 Assignment 3 — Transformer Machine Translation (DE → EN)
+# DA6401 - Assignment 3: Implementing a Transformer for Machine Translation
+
+**Name:** Jaydeep Makwana
+
+**Roll Number:** DA25M013
+
+**Course:** DA6401 - Introduction to Deep Learning
+
+---
+
+## W&B Report
+
+[View Full Experiment Report on Weights & Biases](https://api.wandb.ai/links/jaydeep316-i/szdhqk77)
+
+LINK : https://api.wandb.ai/links/jaydeep316-i/szdhqk77
+
+The report covers all five required experiments:
+- Noam Scheduler vs Fixed Learning Rate
+- Ablation on the Scaling Factor (1/sqrt(dk))
+- Attention Rollout and Head Specialization
+- Sinusoidal Positional Encoding vs Learned Embeddings
+- Label Smoothing (eps=0.1 vs eps=0.0)
+
+---
 
 ## Overview
-Implements the Transformer architecture from *"Attention Is All You Need"* (Vaswani et al., 2017) from scratch using PyTorch. Trains a Neural Machine Translation system on the Multi30k dataset (German → English).
 
-**Test BLEU: 37.20** on Multi30k test set.
+This assignment implements the landmark architecture from the paper **"Attention Is All You Need"** (Vaswani et al., 2017) from scratch using PyTorch. The goal is to build a Neural Machine Translation system that translates text from German to English using the Multi30k dataset.
+
+- **Base Paper:** [Attention Is All You Need](https://proceedings.neurips.cc/paper_files/paper/2017/file/3f5ee243547dee91fbd053c1c4a845aa-Paper.pdf)
+- **Dataset:** [bentrevett/multi30k](https://huggingface.co/datasets/bentrevett/multi30k) — 29,000 training pairs, 1,014 validation pairs, 1,000 test pairs
 
 ---
 
@@ -11,104 +36,137 @@ Implements the Transformer architecture from *"Attention Is All You Need"* (Vasw
 
 ```
 assignment3/
-├── model.py          # Transformer architecture (MHA, PE, Encoder, Decoder)
-├── train.py          # Training loop, LabelSmoothingLoss, greedy decode, BLEU eval
-├── dataset.py        # Data loading from cached tensors
-├── lr_scheduler.py   # Noam warmup scheduler
-└── checkpoints/
-    └── best.pt       # Best checkpoint by validation loss
+├── model.py           # Transformer architecture: attention, encoder, decoder, full model
+├── lr_scheduler.py    # Noam learning rate scheduler
+├── dataset.py         # Multi30k dataset loading, spacy tokenization, vocabulary
+├── train.py           # Training loop, greedy decoding, BLEU evaluation, checkpointing
+├── requirements.txt   # Python dependencies
+└── README.md          # This file
 ```
-
-The notebook (`DA6401_Assignment3_Transformer.ipynb`) is the single entry point — all `.py` files are written by notebook cells and executed in Colab.
 
 ---
 
-## Setup
+## Implementation Summary
 
-### Requirements
+### model.py
+
+| Component | Description |
+|---|---|
+| `scaled_dot_product_attention` | Attention(Q,K,V) = softmax(QKᵀ / sqrt(dk)) · V with optional masking |
+| `make_src_mask` | Padding mask for encoder, shape [batch, 1, 1, src_len] |
+| `make_tgt_mask` | Combined padding + causal look-ahead mask for decoder, shape [batch, 1, tgt_len, tgt_len] |
+| `MultiHeadAttention` | h parallel attention heads with W_Q, W_K, W_V, W_O projections; no use of nn.MultiheadAttention |
+| `PositionalEncoding` | Sinusoidal PE registered as a buffer (non-trainable); PE[pos, 2i] = sin, PE[pos, 2i+1] = cos |
+| `PositionwiseFeedForward` | Two-layer FFN with ReLU: FFN(x) = max(0, xW1+b1)W2+b2 |
+| `EncoderLayer` | Self-attention + Add & Norm + FFN + Add & Norm (Post-LayerNorm) |
+| `DecoderLayer` | Masked self-attention + cross-attention + FFN, all with Add & Norm |
+| `Encoder` / `Decoder` | Stack of N identical layers with final LayerNorm |
+| `Transformer` | Full model with src/tgt embeddings, positional encoding, encoder, decoder, linear projection |
+
+**LayerNorm Choice:** Post-LayerNorm is used, matching the original paper. The residual is added first and then normalised. This choice is justified in the W&B report.
+
+### lr_scheduler.py
+
+Implements the Noam schedule exactly:
+
 ```
-torch, datasets, spacy, sacrebleu, wandb, tqdm, matplotlib
+lrate = d_model^(-0.5) * min(step^(-0.5), step * warmup_steps^(-1.5))
 ```
 
-Install (Cell 2 in notebook):
-```bash
-pip install datasets wandb evaluate sacrebleu tqdm
-python -m spacy download de_core_news_sm
-python -m spacy download en_core_web_sm
-```
+- Linear warmup for `warmup_steps` steps
+- Inverse square root decay afterwards
+- Peak LR occurs near step `warmup_steps`
 
-> **Note:** `torchtext` is incompatible with Python 3.12 + PyTorch 2.10. The vocab is built with a plain `SimpleVocab` class — no torchtext needed.
+### dataset.py
 
-### First-Time Data Setup
-Run **Cell 10A** once. It downloads Multi30k, tokenizes with spaCy, and saves `processed_data.pt` to Google Drive. All subsequent sessions load from the Drive cache automatically.
+- Loads Multi30k from HuggingFace via the `datasets` library
+- Tokenises German (de_core_news_sm) and English (en_core_web_sm) using spacy
+- Builds vocabularies with special tokens: `<unk>`, `<pad>`, `<sos>`, `<eos>`
+- Returns padded torch tensors via a custom collate function
+
+### train.py
+
+| Function | Description |
+|---|---|
+| `LabelSmoothingLoss` | Smoothed cross-entropy with eps=0.1; pad positions receive 0 probability |
+| `run_epoch` | One pass of training or evaluation with W&B logging |
+| `greedy_decode` | Token-by-token autoregressive decoding; stops at `<eos>` or max_len |
+| `evaluate_bleu` | Corpus-level BLEU score over the test set |
+| `save_checkpoint` | Saves model, optimizer, scheduler state and model config |
+| `load_checkpoint` | Restores all state from disk; returns saved epoch |
+| `run_training_experiment` | Full experiment entry point with W&B init and all ablations |
 
 ---
 
-## Model Architecture
+## Hyperparameters
 
-| Hyperparameter | Value |
+| Parameter | Value |
 |---|---|
 | d_model | 256 |
-| Encoder/Decoder layers (N) | 3 |
-| Attention heads | 8 |
+| N (layers) | 3 |
+| num_heads | 8 |
 | d_ff | 512 |
-| Dropout | 0.1 |
-| Label smoothing (ε) | 0.1 |
-| Warmup steps | 4000 |
-| Epochs | 20 |
-| Batch size | 128 |
+| dropout | 0.1 |
+| warmup_steps | 4000 |
+| label smoothing | 0.1 |
+| optimizer | Adam (beta1=0.9, beta2=0.98, eps=1e-9) |
+| batch_size | 128 |
+| epochs | 20 |
 
-- **Positional Encoding:** Sinusoidal (fixed), registered as buffer
-- **Attention:** Custom scaled dot-product + multi-head (no `nn.MultiheadAttention`)
-- **Norm:** Post-LayerNorm (`Add & Norm`)
-- **Optimizer:** Adam (β1=0.9, β2=0.98, ε=1e-9) + Noam scheduler
+A smaller model (d_model=256, N=3) is used to fit within Colab T4 GPU memory and training time constraints while still achieving reasonable BLEU scores on Multi30k.
 
 ---
 
-## Training
+## How to Run
 
-Open the notebook in Google Colab (GPU runtime recommended — T4 is sufficient).
+### 1. Install Dependencies
 
-Run cells in order:
-1. Cells 1–2: GPU check, install dependencies
-2. Cell 3: Mount Google Drive
-3. Cells 5–8: Write `model.py`, `lr_scheduler.py`, `dataset.py`, `train.py`
-4. Cell 9: W&B login
-5. **Cell 10A** *(first time only)*: Build and save dataset
-6. Cell 10: Load dataloaders
-7. Cell 11: Initialize model
-8. Cell 13: Train baseline (20 epochs, ~6 min on T4)
+```bash
+pip install torch numpy matplotlib scikit-learn wandb datasets tqdm evaluate
+pip install spacy
+python -m spacy download en_core_web_sm
+python -m spacy download de_core_news_sm
+```
 
----
+### 2. Run Training
 
-## W&B Experiments
+```bash
+python train.py
+```
 
-All runs are logged to project `da6401-a3`. Runs are grouped by experiment section for easy chart comparison.
+This will:
+- Load and preprocess the Multi30k dataset
+- Initialise W&B logging
+- Train the Transformer
+- Save the best checkpoint to `best_checkpoint.pt`
+- Evaluate BLEU on the test set and log to W&B
 
-| Section | W&B Group | What's compared |
-|---|---|---|
-| 2.1 | `2.1_scheduler` | Noam LR vs Fixed LR `1e-4` |
-| 2.2 | `2.2_scaling` | With vs without `sqrt(d_k)` scaling; Q/K grad norms logged per step |
-| 2.3 | `2.3_attention` | Encoder attention head heatmaps (all 8 heads) |
-| 2.4 | `2.4_pos_encoding` | Sinusoidal PE vs Learned PE (nn.Embedding) |
-| 2.5 | `2.5_label_smoothing` | ε=0.1 vs ε=0.0; prediction confidence logged per epoch |
+### 3. Run on Google Colab
 
----
-
-## Results
-
-| Experiment | Val Loss (best) | Test BLEU |
-|---|---|---|
-| Baseline (Noam + sinusoidal + smooth=0.1) | 2.63 | **37.20** |
-| Fixed LR 1e-4 | higher / diverges early | — |
-| No sqrt(d_k) scaling | unstable grad norms | — |
-| Learned PE | comparable | run Cell 18 |
-| No label smoothing (ε=0.0) | lower loss, overconfident | run Cell 19 |
+Open the provided `DA6401_A3_Colab.ipynb` notebook. Set the runtime to **GPU (T4)**. Run all cells in order. The notebook handles all dependency installation, training, ablation experiments, and W&B logging automatically.
 
 ---
 
-## References
+## Experiments
 
-- Vaswani et al., *Attention Is All You Need*, NeurIPS 2017 — https://arxiv.org/abs/1706.03762
-- Multi30k dataset — https://huggingface.co/datasets/bentrevett/multi30k
-- Assignment spec — DA6401, IIT Madras
+### 2.1 Noam Scheduler vs Fixed LR
+
+The Noam scheduler prevents early divergence by warming up the learning rate gradually. Without warmup, the large random initial weights in the attention projections cause extremely large gradient updates in the first few steps, destabilising training. The W&B report overlays training loss and validation accuracy for both conditions.
+
+### 2.2 Scaling Factor Ablation
+
+Removing 1/sqrt(dk) allows dot products to grow large (O(dk)) for large dk, pushing softmax into saturation regions with near-zero gradients. The report logs gradient norms of Q and K weights during the first 1000 steps for both variants.
+
+### 2.3 Attention Rollout and Head Specialization
+
+Attention weights from the last encoder layer are visualised as per-head heatmaps. Specific heads show distinct behaviours: some attend locally (next token), others capture long-range syntactic dependencies. Head redundancy analysis is included in the report.
+
+### 2.4 Sinusoidal PE vs Learned Embeddings
+
+Sinusoidal encoding (using `register_buffer`) is compared against `nn.Embedding`-based learned positional embeddings. Validation BLEU is tracked for both. The report discusses how sinusoidal encodings allow extrapolation to unseen lengths via their deterministic frequency structure, unlike learned embeddings which have no inductive bias beyond the training length.
+
+### 2.5 Label Smoothing
+
+Training with eps=0.1 vs eps=0.0 (hard cross-entropy). Prediction confidence (softmax probability of the correct token) is logged to W&B. Label smoothing acts as a regulariser by preventing the model from assigning all probability mass to the argmax token, which reduces overconfidence and improves generalisation even at the cost of slightly higher training perplexity.
+
+
