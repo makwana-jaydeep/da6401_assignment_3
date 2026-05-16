@@ -1,7 +1,3 @@
-"""
-model.py -- Transformer Architecture
-DA6401 Assignment 3: "Attention Is All You Need"
-"""
 
 import math
 import copy
