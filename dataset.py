@@ -1,17 +1,4 @@
-"""
-dataset.py
-DA6401 Assignment 3 -- Multi30k data pipeline
 
-Handles everything from raw HuggingFace download to ready-to-use
-DataLoaders. Tokenisation is done with spaCy (German + English),
-and vocabularies are built with torchtext's build_vocab_from_iterator.
-
-Special token layout (fixed indices expected by model.py and train.py):
-    index 0  ->  <unk>
-    index 1  ->  <pad>
-    index 2  ->  <sos>
-    index 3  ->  <eos>
-"""
 
 import torch
 from torch.utils.data import Dataset, DataLoader
@@ -35,11 +22,7 @@ EOS_IDX    = 3
 # ---------------------------------------------------------------------------
 
 def get_spacy_tokenizers():
-    """
-    Load German and English spaCy models.
-    If either model is missing from the environment, download it first.
-    Returns a (de_nlp, en_nlp) tuple.
-    """
+   
     try:
         german = spacy.load("de_core_news_sm")
     except OSError:
@@ -82,18 +65,7 @@ def tokenise_english(sentence, nlp_model):
 # ---------------------------------------------------------------------------
 
 class Multi30kDataset(Dataset):
-    """
-    PyTorch Dataset wrapping the bentrevett/multi30k HuggingFace split.
-
-    For the training split, vocabularies are built on-the-fly.
-    For validation and test splits, pass the pre-built vocabs from the
-    training dataset so the index space is shared.
-
-    Args:
-        split      : one of "train", "validation", "test"
-        src_vocab  : pre-built torchtext vocab for German (None for train)
-        tgt_vocab  : pre-built torchtext vocab for English (None for train)
-    """
+    
 
     def __init__(self, split="train", src_vocab=None, tgt_vocab=None):
         self.split = split
@@ -125,13 +97,7 @@ class Multi30kDataset(Dataset):
     # ------------------------------------------------------------------
 
     def build_vocab(self):
-        """
-        Build source (de) and target (en) vocabularies from training data.
-
-        Uses torchtext's build_vocab_from_iterator which handles
-        frequency counting and special-token insertion cleanly.
-        Default index is set to UNK so unknown tokens don't raise errors.
-        """
+        
 
         # Generator functions yield one tokenised sentence at a time to
         # avoid loading every token list into memory simultaneously.
@@ -164,13 +130,7 @@ class Multi30kDataset(Dataset):
     # ------------------------------------------------------------------
 
     def process_data(self):
-        """
-        Walk through every sentence pair in the split, tokenise both sides,
-        look up integer indices, and wrap with <sos>/<eos> boundary tokens.
-
-        Returns a list of (src_tensor, tgt_tensor) pairs where both tensors
-        are 1-D LongTensors.
-        """
+        
         converted = []
         for pair in self.raw_data:
             # Tokenise both sides with the respective spaCy pipeline.
@@ -205,13 +165,7 @@ class Multi30kDataset(Dataset):
 # ---------------------------------------------------------------------------
 
 def collate_fn(batch, pad_idx=PAD_IDX):
-    """
-    Combine a list of variable-length (src, tgt) pairs into two padded
-    batch tensors.
-
-    pad_sequence fills shorter sequences with pad_idx so every row in the
-    batch has the same length. batch_first=True gives [batch, seq_len].
-    """
+    
     src_seqs, tgt_seqs = zip(*batch)
     src_batch = pad_sequence(src_seqs, batch_first=True, padding_value=pad_idx)
     tgt_batch = pad_sequence(tgt_seqs, batch_first=True, padding_value=pad_idx)
@@ -223,19 +177,6 @@ def collate_fn(batch, pad_idx=PAD_IDX):
 # ---------------------------------------------------------------------------
 
 def build_dataloaders(batch_size=128):
-    """
-    Build and return all three DataLoaders plus the shared vocabularies.
-
-    Workflow:
-        1. Build Multi30kDataset for train (also constructs the vocabs).
-        2. Pass the same vocabs to validation and test datasets so index
-           spaces are consistent across all splits.
-        3. Wrap each dataset in a DataLoader. Test set uses batch_size=1
-           so that greedy_decode() gets one sentence at a time.
-
-    Returns:
-        train_loader, val_loader, test_loader, src_vocab, tgt_vocab
-    """
     # Training set -- vocab is built here.
     train_dataset = Multi30kDataset(split="train")
     shared_src_vocab = train_dataset.src_vocab
