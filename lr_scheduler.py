@@ -1,16 +1,4 @@
-"""
-Noam LR Scheduler
 
-paper ref:
-"Attention Is All You Need"
-https://arxiv.org/abs/1706.03762
-
-lr formula used:
-
-lrate = d_model^(-0.5) *
-        min(step^(-0.5),
-            step * warmup_steps^(-1.5))
-"""
 
 import torch
 import torch.optim as optim
@@ -18,13 +6,7 @@ from torch.optim.lr_scheduler import LRScheduler
 
 
 class NoamScheduler(LRScheduler):
-    """
-    implementation of noam scheduler from transformer paper.
-
-    lr first increases during warmup and after that
-    slowly starts decreasing.
-    """
-
+    
     def __init__(
         self,
         optimizer: optim.Optimizer,
@@ -58,9 +40,7 @@ class NoamScheduler(LRScheduler):
         return scale
 
     def get_lr(self) -> list:
-        """
-        returns lr for each optimizer param group.
-        """
+        
 
         scale = self._get_lr_scale()
 
@@ -78,9 +58,7 @@ def get_lr_history(
     warmup_steps: int,
     total_steps: int,
 ) -> list:
-    """
-    helper fn to visualize how lr changes over time.
-    """
+    
 
     # dummy layer just for attaching optimizer
     dummy_model = torch.nn.Linear(1, 1)
